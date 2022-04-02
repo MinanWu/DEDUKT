@@ -57,4 +57,6 @@ echo "Install directory is $INSTALL_DIR"
   VERBOSE=1 make all install
 # fi
 
-cd $RETURN_DIR
+echo ""; echo "Installation complete!"
+
+# cd $RETURN_DIR

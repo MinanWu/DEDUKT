@@ -21,6 +21,11 @@ include(BuildSettings)
 include(Packages)
 include(Macros)
 
+### Added by Zach ###
+include_directories(
+        /usr/common/software/sles15_cgpu/cuda/10.2.89/include
+)
+
 add_subdirectory(common)
 add_subdirectory(fqreader)
 add_subdirectory(loadfq)
@@ -30,10 +35,10 @@ add_subdirectory(kmercount)
 #add_subdirectory(main)
 
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts
-	DESTINATION bin
-	PATTERN "scripts/*"
-	PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-		GROUP_EXECUTE GROUP_READ
-		WORLD_EXECUTE WORLD_READ)
+        DESTINATION bin
+        PATTERN "scripts/*"
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+                GROUP_EXECUTE GROUP_READ
+                WORLD_EXECUTE WORLD_READ)
 
 print_features()
