@@ -108,8 +108,8 @@ object			SOURCES				readufx.cpp
 			TYPE				OBJECT
 			TARGET_NAME			${NAME}
 			OUTPUT_NAME			${NAME}
-			SOURCES				kmermatch.cu spmer_kmrCnt.cpp spmer_kmrCnt_GPU.cu kmrCnt_GPU.cu 
-			HEADERS				common.h spmer_kmrCnt.h common_gpu.h kmrCnt_GPU.h
+			SOURCES				kmermatch.cu spmer_kmrCnt.cpp spmer_kmrCnt_GPU.cu kmrCnt_GPU.cu UniversalHittingSet_Hashtable.cu
+			HEADERS				common.h spmer_kmrCnt.h common_gpu.h kmrCnt_GPU.h UniversalHittingSet_Hashtable.hpp
 			DEFINITIONS			${KMER_DEFS}
 			LINK_LIBRARIES		${ZLIB_LIBRARIES}
 			CXXFLAGS			${MPI_CXX_COMPILE_FLAGS}

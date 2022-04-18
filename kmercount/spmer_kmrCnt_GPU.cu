@@ -6,7 +6,9 @@
 #include "Pack.h"
 #include "spmer_kmrCnt.h"
 
-__device__ keyType find_minimizer(keyType kmer, int klen, int mlen, keyType max64){
+#include "UniversalHittingSet_Hashtable.hpp"
+
+__device__ keyType find_minimizer_lexicographical(keyType kmer, int klen, int mlen, keyType max64){
 
 	keyType minimizer = max64;
 	keyType mask = pow(2, 2 * mlen) - 1;
@@ -18,11 +20,38 @@ __device__ keyType find_minimizer(keyType kmer, int klen, int mlen, keyType max6
 			minimizer = mmer;
 	}
 	return minimizer;
+
+}
+
+__device__ keyType find_minimizer_uhs_frequency(keyType kmer, int klen, int mlen, KeyValue* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
+
+    // ... (Function for Task 3)
+
+    // int klen:  The length of the K-mer
+    // int mlen:  The length of the minimizers
+    // KeyValue* uhs_frequencies_hashtable:  The hashtable of m-mer frequencies; at this point, entries for all of the m-mers in the hitting set have been created, and their frequencies are all initialized to 0
+    // uint64_t uhs_hashtable_capacity:  The number of slots in the hashtable, which is usually more than the number of m-mers in the hitting set; this may change if we end up needing to experiment with different load factors to optimize performance
+
+    // There's already a function — get_mmer_frequency_gpu(...), in UniversalHittingSet_Hashtable.cu — that you can call to retrieve the frequency of an m-mer, so you shouldn't need to interface with the hash table directly here at all
+
+    // This next line is just to make it compile and work for now
+    return find_minimizer_lexicographical(kmer, klen, mlen, 18446744073709551615);
+
+}
+
+__device__ keyType find_minimizer(keyType kmer, int klen, int mlen, keyType max64, int minimizer_ordering, KeyValue* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
+    if (minimizer_ordering == 1) {
+        return find_minimizer_uhs_frequency(kmer, klen, mlen, uhs_frequencies_hashtable, uhs_hashtable_capacity);
+    }
+    else {
+        return find_minimizer_lexicographical(kmer, klen, mlen, max64);
+    }
 }
 
 __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, unsigned int seq_len,
 		keyType* outgoing, unsigned char *out_slen, int *owner_counter, int nproc, unsigned int p_buff_len, 
-		int per_block_seq_len, int window, int rank){
+		int per_block_seq_len, int window, int rank,
+        int minimizer_ordering, KeyValue* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
 
 	unsigned int tId = threadIdx.x;
 	unsigned int laneId = tId & (blockDim.x - 1);
@@ -64,7 +93,7 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 			}
 		}
 		if(validKmer){
-			cur_mini = find_minimizer(comprs_Kmer, klen, mlen, max64);
+			cur_mini = find_minimizer(comprs_Kmer, klen, mlen, max64, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity);
 			prev_mini = cur_mini; 
 			// owner = cuda_murmur3_64(cur_mini) & (nproc - 1); // remove & with HTcapacity in func
 			// keyType myhash = cuda_murmur3_64(cur_mini); // remove & with HTcapacity in func
@@ -106,7 +135,7 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 
 			if(validKmer){ 
 
-				cur_mini = find_minimizer(comprs_Kmer, klen, mlen, max64);
+				cur_mini = find_minimizer(comprs_Kmer, klen, mlen, max64, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity);
 
 				if(prev_mini == cur_mini){ 
 					// printf("mini match  %lu %lu \n", cur_mini, comprs_Smer );         
@@ -156,7 +185,8 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 }
 
 void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_counter, 
-		vector<keyType>& h_send_smers, vector<unsigned char>& h_send_slens, int n_kmers, int rank, int BUFF_SCALE )
+		vector<keyType>& h_send_smers, vector<unsigned char>& h_send_slens, int n_kmers, int rank, int BUFF_SCALE,
+        int minimizer_ordering, char* uhs_file_path)
 {
 
 	int count, devId;
@@ -192,6 +222,25 @@ void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_coun
 	cudaMemset(d_supermers,  0, n_kmers * BUFF_SCALE * sizeof(keyType));
 	cudaMemset(d_owner_counter,  0, sizeof(int) * nproc);
 
+    KeyValue* uhs_frequencies_hashtable = NULL;
+    uint64_t uhs_hashtable_capacity = 0;
+
+    if (minimizer_ordering == 1) {
+		uhs_frequencies_hashtable = initialize_uhs_frequencies_hashtable(
+			uhs_file_path,
+			mlen,
+			myrank,
+			&uhs_hashtable_capacity
+		);
+		set_uhs_frequencies_from_sample(
+			d_seq,
+			0.01,
+			mlen,
+			uhs_frequencies_hashtable,
+			uhs_hashtable_capacity
+		);
+	}
+
 	int window = 32 - klen;// - mlen + 1 ;
 
 	unsigned int p_buff_len = ((n_kmers * BUFF_SCALE) + nproc - 1)/nproc;
@@ -201,7 +250,7 @@ void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_coun
 	int per_block_seq_len = b * window;// ((seq_len+window-1/window) + (g - 1)) / g;
 
 	// Kernel call
-	cuda_build_supermer<<<g, b>>>(d_seq, d_kmers, klen, mlen, seq_len, d_supermers, d_slen, d_owner_counter, nproc, p_buff_len, per_block_seq_len, window, rank);
+	cuda_build_supermer<<<g, b>>>(d_seq, d_kmers, klen, mlen, seq_len, d_supermers, d_slen, d_owner_counter, nproc, p_buff_len, per_block_seq_len, window, rank, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity);
 
 	//* Memcopy to CPU */
 	checkCuda (cudaMemcpy(h_send_smers.data(), d_supermers, n_kmers * BUFF_SCALE * sizeof(keyType), cudaMemcpyDeviceToHost), __LINE__); 
@@ -383,5 +432,3 @@ double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &l
 
 	return tot_exch_time;
 }
-
-

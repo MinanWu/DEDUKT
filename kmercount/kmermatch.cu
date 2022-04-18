@@ -138,6 +138,10 @@ int reliable_max = MAX_NUM_READS;
 double tot_pack_GPU = 0.0, tot_exch_GPU = 0.0, tot_process_GPU = 0.0;
 
 
+int minimizer_ordering = 0;
+char* uhs_file_path;
+
+
 READIDS newReadIdList() {
 	READIDS toreturn = *(new READIDS);
 	ASSERT(nullReadId == 0, "Read ID lists are being initialized to 0, despite the reserved null read ID being non-zero..."); // TODO
@@ -179,6 +183,7 @@ inline void StoreReadName(const ReadId & readIndex, std::string name, std::unord
 }
 
 KeyValue* d_hashTable;
+
 // use:  km.toString(s);
 // pre:  s has space for k+1 elements
 // post: s[0,...,k-1] is the DNA string for the Kmer km and s[k] = '\0'
@@ -608,7 +613,8 @@ size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgo
 
 	// getSupermers_CPU_DEBUG(seqs_arr, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, h_send_smers, h_send_slens, nkmers_smer_batch,  myrank);	
 	getSupermers_GPU(all_seqs, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, 
-		h_send_smers, h_send_slens, nkmers_smer_batch,  myrank, BUFF_SCALE);
+		h_send_smers, h_send_slens, nkmers_smer_batch,  myrank, BUFF_SCALE,
+		minimizer_ordering, uhs_file_path);
 	tot_GPUsmer_build += MPI_Wtime() -  start_gpu_smer ;
 
 	//* Exchange supermers on CPU */
@@ -1377,8 +1383,9 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				else if(type == 2) // Supermer based kcounter on CPU
 					spmer_kmerCount(seqs, tmp_offset, offset, KMER_LENGTH, MINIMIZER_LENGTH);
 
-				else if(type == 3) // Supermer based kcounter on GPU
+				else if (type == 3) { // Supermer based kcounter on GPU
 					spmer_kmerCount_GPU(seqs, outgoing, exchangeAndCountPass, tmp_offset, offset);    // no-op if seqs.size() == 0
+				}
 
 				double process_t = MPI_Wtime() - exch_start_t - pack_t - exch_t;
 				tot_process += process_t;
@@ -1878,7 +1885,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				int max_num_seeds = -1;
 
 				option_t *this_opt;
-				option_t *opt_list = GetOptList(argc, argv, "i:e:u:p:BHESaP:k:x:y:m:q:d:t:w:n:");
+				option_t *opt_list = GetOptList(argc, argv, "i:e:u:p:BHESaP:k:x:y:m:q:d:t:w:n:f:");
 				print_args(opt_list, __func__);
 
 				while (opt_list) {
@@ -1954,6 +1961,10 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 								  }
 								  break;
 							  }
+                        case 'f':
+                            minimizer_ordering = 1;
+                            uhs_file_path = this_opt->argument;
+                            break;
 						default:
 							  opt_err = true;
 					}
