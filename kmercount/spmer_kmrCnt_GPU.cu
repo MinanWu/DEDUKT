@@ -39,6 +39,23 @@ __device__ keyType find_minimizer_uhs_frequency(keyType kmer, int klen, int mlen
 
 }
 
+
+// __device__ keyType find_minimizer_uhs_frequency(keyType kmer, int klen, int mlen, KeyValue* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
+//     keyType mask = pow(2, 2 * mlen) - 1;
+//     keyType minimizer =  (kmer >> (2*(31-(mlen-1)))) & mask;
+//     uint32_t max_frequency = get_mmer_frequency_gpu(minimizer, uhs_frequencies_hashtable, uhs_hashtable_capacity);
+
+//     for (int m = 1; m < (klen - mlen); ++m) {
+//         keyType mmer =  (kmer >> (2*(31-(mlen+m-1)))) & mask;
+//         uint32_t cur_frequency = get_mmer_frequency_gpu(mmer, uhs_frequencies_hashtable, uhs_hashtable_capacity);
+//         if(max_frequency < cur_frequency) {
+//             minimizer = mmer;
+//             max_frequency = cur_frequency;
+//         }
+//     }
+//     return minimizer;   
+// }
+
 __device__ keyType find_minimizer(keyType kmer, int klen, int mlen, keyType max64, int minimizer_ordering, KeyValue* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
     if (minimizer_ordering == 1) {
         return find_minimizer_uhs_frequency(kmer, klen, mlen, uhs_frequencies_hashtable, uhs_hashtable_capacity);
