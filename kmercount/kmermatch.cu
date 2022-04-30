@@ -138,6 +138,8 @@ int reliable_max = MAX_NUM_READS;
 double tot_pack_GPU = 0.0, tot_exch_GPU = 0.0, tot_process_GPU = 0.0;
 
 
+#include "UniversalHittingSet_Hashtable.hpp"
+
 int minimizer_ordering = 0;
 char* uhs_file_path;
 
@@ -568,7 +570,7 @@ uint64_t nkmers_smer_all = 0;
 uint64_t nSupermers_all = 0;
 double tot_GPUsmer_build = 0, tot_GPUsmer_exch = 0, tot_GPU_smer_kcounter = 0;
 
-size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgoing, int pass, size_t offset, int endoffset)
+size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgoing, int pass, size_t offset, int endoffset, int minimizer_ordering, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count)
 {
 	double start_gpu_smer = MPI_Wtime();
 	uint64_t HTsize_smer = 0, totalPairs_smer = 0, all_seq_size = 0; 
@@ -614,7 +616,8 @@ size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgo
 	// getSupermers_CPU_DEBUG(seqs_arr, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, h_send_smers, h_send_slens, nkmers_smer_batch,  myrank);	
 	getSupermers_GPU(all_seqs, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, 
 		h_send_smers, h_send_slens, nkmers_smer_batch,  myrank, BUFF_SCALE,
-		minimizer_ordering, uhs_file_path);
+		minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity,
+		uhs_mmers, uhs_mmers_count);
 	tot_GPUsmer_build += MPI_Wtime() -  start_gpu_smer ;
 
 	//* Exchange supermers on CPU */
@@ -1270,6 +1273,22 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 	}
 	std::vector<int> maxReadLengths;
 
+	uhs_hashtable_slot* uhs_frequencies_hashtable = NULL;
+	uint64_t uhs_hashtable_capacity = 0;
+	uhs_key_t* uhs_mmers;
+	uint64_t uhs_mmers_count;
+
+	if (minimizer_ordering == 1) {
+		uhs_frequencies_hashtable = initialize_uhs_frequencies_hashtable(
+			uhs_file_path,
+			MINIMIZER_LENGTH,
+			myrank,
+			&uhs_hashtable_capacity
+			&uhs_mmers,
+			&uhs_mmers_count
+		);
+	}
+
 	int nReads = 0;
 	double pfqTime = 0.0;
 	auto files_itr = allfiles.begin();
@@ -1384,7 +1403,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 					spmer_kmerCount(seqs, tmp_offset, offset, KMER_LENGTH, MINIMIZER_LENGTH);
 
 				else if (type == 3) { // Supermer based kcounter on GPU
-					spmer_kmerCount_GPU(seqs, outgoing, exchangeAndCountPass, tmp_offset, offset);    // no-op if seqs.size() == 0
+					spmer_kmerCount_GPU(seqs, outgoing, exchangeAndCountPass, tmp_offset, offset, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity, uhs_mmers, uhs_mmers_count);    // no-op if seqs.size() == 0
 				}
 
 				double process_t = MPI_Wtime() - exch_start_t - pack_t - exch_t;
@@ -1969,6 +1988,8 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 							  opt_err = true;
 					}
 				}
+
+                printf("~~~~ Hello from MPI rank %d, line 1988 ~~~~\n", myrank);
 
 				if (opt_err || !input_fofn)
 				{

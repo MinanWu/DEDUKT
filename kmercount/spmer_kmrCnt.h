@@ -1,3 +1,5 @@
+// spmer_kmrCnt.h
+
 #ifndef SP_KC_H
 #define SP_KC_H
 
@@ -10,6 +12,9 @@
 #include <algorithm>
 #include "common.h"
 #include "common_gpu.h"
+
+#include "UniversalHittingSet_Hashtable.hpp"
+
 using namespace std;
 
 typedef unsigned long long int keyType;
@@ -23,10 +28,11 @@ size_t spmer_kmerCount(vector<string> seqs, size_t offset, size_t endoffset,
 			int klen, int mlen);
 
 void getSupermers_GPU (string seq, int klen, int mlen, int nproc,
-		       int *owner_counter, vector <keyType> &h_send_smers,
-		       vector <unsigned char> &h_send_slens, int n_kmers, int rank,
-		       int BUFF_LEN,
-		       int minimizer_ordering, char* uhs_file_path);
+			   int *owner_counter, vector <keyType> &h_send_smers,
+			   vector <unsigned char> &h_send_slens, int n_kmers, int rank,
+			   int BUFF_LEN,
+			   int minimizer_ordering, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity,
+			   uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count);
 void GPU_SP_buildCounter(KeyValue* pHashTable, vector<keyType> &recvbuf, vector<unsigned char> &recvbuf_len,
 		int * recvcnt, uint32_t num_keys, int klen, int rank, int p_buff_len);
 double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &len_smers, 
