@@ -9,6 +9,8 @@ elif [[ $NERSC_HOST = "edison" ]]; then
   source $ENVSCRIPTS_PATH/edison-env.sh
 elif [[ $NERSC_HOST = "cori" ]]; then
   source $ENVSCRIPTS_PATH/cori-env.sh
+elif [[ $NERSC_HOST = "perlmutter" ]]; then
+  source $ENVSCRIPTS_PATH/perlmutter-env.sh
 elif [[ $NERSC_HOST = "denovo" ]]; then
   source $ENVSCRIPTS_PATH/denovo-env.sh
 elif [[ $HOST = "titan"* ]]; then
@@ -54,7 +56,7 @@ VERBOSE=1 cmake $DEFS ..
 echo "Install directory is $INSTALL_DIR"
 # read -n 1 -p "Press 'y' to install:" yes_install
 # if [ "$yes_install" = "y" ]; then
-  VERBOSE=1 make all install
+  VERBOSE=1 make -sj all install
 # fi
 
 echo ""; echo "Installation complete!"
