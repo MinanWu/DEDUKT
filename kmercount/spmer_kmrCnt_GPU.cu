@@ -18,7 +18,7 @@ __device__ keyType find_minimizer_lexicographical(keyType kmer, int klen, int ml
 	for (int m = 0; m < (klen - mlen ); ++m){
 		keyType mmer =  (kmer >> (2*(31-(mlen+m -1)))) & mask;
 
-		if( mmer < minimizer ) 
+		if( mmer < minimizer )
 			minimizer = mmer;
 	}
 	return minimizer;
@@ -28,18 +28,14 @@ __device__ keyType find_minimizer_lexicographical(keyType kmer, int klen, int ml
 __device__ keyType find_minimizer_uhs_frequency(keyType kmer, int klen, int mlen, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
 	// return find_minimizer_lexicographical(kmer, klen, mlen, 18446744073709551615);
 	keyType mask = pow(2, (2 * mlen)) - 1;
-	// keyType current_minimizer = 0;
 	uhs_key_t current_minimizer_numeric = 0;
 	uint32_t current_minimizer_frequency = 1000000000;
 	for (int index = 0; index < (klen - mlen); index += 1) {
 		uhs_key_t mmer_numeric = ((kmer >> (2 * (31 - (mlen + index - 1)))) & mask);
 		uhs_value_t mmer_frequency = get_mmer_frequency_gpu(mmer_numeric, uhs_frequencies_hashtable, uhs_hashtable_capacity);
-		// if (mmer_frequency < current_minimizer_frequency) {
-		// 	current_minimizer = mmer_numeric;
-		// 	current_minimizer_frequency = mmer_frequency;
-		// }
-		if (mmer_numeric < current_minimizer_numeric) {
+		if (mmer_frequency < current_minimizer_frequency) {
 			current_minimizer_numeric = mmer_numeric;
+			current_minimizer_frequency = mmer_frequency;
 		}
 	}
 	return current_minimizer_numeric;
@@ -55,7 +51,7 @@ __device__ keyType find_minimizer(keyType kmer, int klen, int mlen, keyType max6
 }
 
 __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, unsigned int seq_len,
-		keyType* outgoing, unsigned char *out_slen, int *owner_counter, int nproc, unsigned int p_buff_len, 
+		keyType* outgoing, unsigned char *out_slen, int *owner_counter, int nproc, unsigned int p_buff_len,
 		int per_block_seq_len, int window, int rank,
 		int minimizer_ordering, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
 
@@ -73,7 +69,7 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 	int owner = -1;
 	int old_count=-1;
 
-	keyType cur_mini = max64;  keyType prev_mini = cur_mini;    
+	keyType cur_mini = max64;  keyType prev_mini = cur_mini;
 
 	//****First kmer of this window *****
 	int i = st_char_block + laneId * window;
@@ -83,13 +79,13 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 		comprs_Kmer = 0;
 		for (int k = 0; k < klen ; ++k) {
 			char s =  seq[i + k ];
-			if(s == 'a' || s == 'N')  { 
+			if(s == 'a' || s == 'N')  {
 				// w += klen-1;
 				validKmer = false; break; //FIXIT can have 'n'
 			}
 			int j = k % 32;
 			size_t x = ((s) & 4) >> 1;
-			// comprs_Kmer |= ((x + ((x ^ (s & 2)) >>1)) << (2*(31-j))); //make it longs[] to support larger kmer  
+			// comprs_Kmer |= ((x + ((x ^ (s & 2)) >>1)) << (2*(31-j))); //make it longs[] to support larger kmer
 
 			switch(s) { //redefined
 				case 'A': comprs_Kmer |= ((x + (x^1)) << (2*(31-j)));  break;
@@ -100,16 +96,16 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 		}
 		if(validKmer){
 			cur_mini = find_minimizer(comprs_Kmer, klen, mlen, max64, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity);
-			prev_mini = cur_mini; 
+			prev_mini = cur_mini;
 			// owner = cuda_murmur3_64(cur_mini) & (nproc - 1); // remove & with HTcapacity in func
 			// keyType myhash = cuda_murmur3_64(cur_mini); // remove & with HTcapacity in func
 			keyType myhash = cuda_MurmurHash3_x64_128((const void *)&cur_mini, 8, 313);// & (nproc - 1);
 			double range = static_cast<double>(myhash) * static_cast<double>(nproc);
 			owner = range / max64;
 
-			old_count = atomicAdd(&owner_counter[owner],1); 
+			old_count = atomicAdd(&owner_counter[owner],1);
 			outgoing[owner * p_buff_len + old_count] = comprs_Kmer; //hash (longs)
-			out_slen[owner * p_buff_len + old_count] = klen;  
+			out_slen[owner * p_buff_len + old_count] = klen;
 
 		}
 		comprs_Smer = comprs_Kmer;
@@ -124,29 +120,29 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 			// if ((i + klen-1) > nKmer) return;
 			for (int k = 0; k < klen ; ++k) {
 				char s =  seq[c + w + k ];
-				if(s == 'a' || s == 'N')  { 
+				if(s == 'a' || s == 'N')  {
 					// w += klen-1;
 					validKmer = false; break;
 				}
 				int j = k % 32;
 				size_t x = ((s) & 4) >> 1;
-				// comprs_Kmer |= ((x + ((x ^ (s & 2)) >>1)) << (2*(31-j))); //make it longs[] to support larger kmer  
+				// comprs_Kmer |= ((x + ((x ^ (s & 2)) >>1)) << (2*(31-j))); //make it longs[] to support larger kmer
 				switch(s) { //redefined
 					case 'A': comprs_Kmer |= ((x + (x^1)) << (2*(31-j)));  break;
 					case 'C': comprs_Kmer |= ((x + (x^0)) << (2*(31-j)));  break;
 					case 'G': comprs_Kmer |= ((x + (x^3)) << (2*(31-j)));  break;
 					case 'T': comprs_Kmer |= ((x + (x^2)) << (2*(31-j)));  break;
 				}
-			}  
+			}
 
-			if(validKmer){ 
+			if(validKmer){
 
 				cur_mini = find_minimizer(comprs_Kmer, klen, mlen, max64, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity);
 
-				if(prev_mini == cur_mini){ 
-					// printf("mini match  %lu %lu \n", cur_mini, comprs_Smer );         
+				if(prev_mini == cur_mini){
+					// printf("mini match  %lu %lu \n", cur_mini, comprs_Smer );
 					char s =  seq[c + w + klen - 1];
-					int j = slen % 32; 
+					int j = slen % 32;
 					size_t x = ((s) & 4) >> 1;
 					// comprs_Smer |= ((x + ((x ^ (s & 2)) >>1)) << (2*(31-j)));
 					switch(s) { //redefined
@@ -157,12 +153,12 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 					}
 					slen++;
 				}
-				else 	{ 
+				else 	{
 
 					if(owner > -1 && old_count > -1)
 					{
-						outgoing[owner * p_buff_len + old_count] = comprs_Smer; //hash (longs) 
-						out_slen[owner * p_buff_len + old_count] = slen;                          
+						outgoing[owner * p_buff_len + old_count] = comprs_Smer; //hash (longs)
+						out_slen[owner * p_buff_len + old_count] = slen;
 					}
 					//* new supermer */
 					slen = klen;
@@ -173,34 +169,34 @@ __global__ void cuda_build_supermer(char *seq, char *kmers, int klen, int mlen, 
 					double range = static_cast<double>(myhash) * static_cast<double>(nproc);
 					owner = range / max64;
 
-					old_count = atomicAdd(&owner_counter[owner],1); 
-					if(old_count > p_buff_len )  { 
+					old_count = atomicAdd(&owner_counter[owner],1);
+					if(old_count > p_buff_len )  {
 						printf("Overflow!! MISSION ABORT!!\n"); return;
-					}               
-					outgoing[owner * p_buff_len + old_count] = comprs_Smer; //hash (longs) 
-					out_slen[owner * p_buff_len + old_count] = slen;  
+					}
+					outgoing[owner * p_buff_len + old_count] = comprs_Smer; //hash (longs)
+					out_slen[owner * p_buff_len + old_count] = slen;
 				}
 				prev_mini = cur_mini;
 			}
-		}   
+		}
 		if(old_count > -1 && owner > -1) {
 			outgoing[owner * p_buff_len + old_count] = comprs_Smer; //hash (longs)
-			out_slen[owner * p_buff_len + old_count] = slen; 
+			out_slen[owner * p_buff_len + old_count] = slen;
 		}
-	}         
+	}
 }
 
 
-void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_counter, 
+void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_counter,
 		vector<keyType>& h_send_smers, vector<unsigned char>& h_send_slens, int n_kmers, int rank, int BUFF_SCALE,
-		int minimizer_ordering, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count)
+		int minimizer_ordering, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, float uhs_sample_fraction, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count, long uhs_mpi_mode)
 {
 
 	int count, devId;
 	char *d_kmers, *d_seq;
 	keyType *d_supermers, *d_outOverflowBuff;
 	unsigned char *d_slen;
-	int *d_owner_counter; 
+	int *d_owner_counter;
 
 	//* Map MPI ranks to GPUs */
 	cudaGetDeviceCount(&count);
@@ -220,8 +216,8 @@ void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_coun
 	cuda_timer_start(start);
 
 	// CUDA mallocs
-	checkCuda (cudaMalloc(&d_supermers, n_kmers * BUFF_SCALE * sizeof(keyType)), __LINE__);  // giving 2x space to each node 
-	checkCuda (cudaMalloc(&d_slen, n_kmers * BUFF_SCALE * sizeof(unsigned char)), __LINE__);  // giving 2x space to each node 
+	checkCuda (cudaMalloc(&d_supermers, n_kmers * BUFF_SCALE * sizeof(keyType)), __LINE__);  // giving 2x space to each node
+	checkCuda (cudaMalloc(&d_slen, n_kmers * BUFF_SCALE * sizeof(unsigned char)), __LINE__);  // giving 2x space to each node
 	checkCuda (cudaMalloc(&d_seq, seq_len * sizeof(char)), __LINE__);
 	checkCuda (cudaMalloc(&d_owner_counter, nproc * sizeof(int)), __LINE__);
 	// CUDA memcopies
@@ -230,7 +226,7 @@ void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_coun
 	cudaMemset(d_owner_counter,  0, sizeof(int) * nproc);
 
 	if (minimizer_ordering == 1) {
-		reset_uhs_hashtable_frequencies(
+		reset_uhs_frequencies(
 			uhs_frequencies_hashtable,
 			uhs_hashtable_capacity,
 			uhs_mmers,
@@ -239,12 +235,18 @@ void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_coun
 		set_uhs_frequencies_from_sample(
 			d_seq,
 			seq_len,
-			0.01,
+			uhs_sample_fraction,
 			mlen,
 			uhs_frequencies_hashtable,
 			uhs_hashtable_capacity
 		);
-		// Create functions to do the reduction (probably in UniversalHittingSet_Hashtable.cu) and call them here
+		allreduce_uhs_frequencies(
+			uhs_frequencies_hashtable,
+			uhs_hashtable_capacity,
+			uhs_mmers,
+			uhs_mmers_count,
+			uhs_mpi_mode
+		);
 	}
 
 	int window = 32 - klen;// - mlen + 1 ;
@@ -259,15 +261,15 @@ void getSupermers_GPU(string seq, int klen, int mlen, int nproc, int *owner_coun
 	cuda_build_supermer<<<g, b>>>(d_seq, d_kmers, klen, mlen, seq_len, d_supermers, d_slen, d_owner_counter, nproc, p_buff_len, per_block_seq_len, window, rank, minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity);
 
 	//* Memcopy to CPU */
-	checkCuda (cudaMemcpy(h_send_smers.data(), d_supermers, n_kmers * BUFF_SCALE * sizeof(keyType), cudaMemcpyDeviceToHost), __LINE__); 
-	checkCuda (cudaMemcpy(h_send_slens.data(), d_slen, n_kmers * BUFF_SCALE * sizeof(unsigned char), cudaMemcpyDeviceToHost), __LINE__); 
-	checkCuda (cudaMemcpy(owner_counter, d_owner_counter, nproc * sizeof(int) , cudaMemcpyDeviceToHost), __LINE__); 
+	checkCuda (cudaMemcpy(h_send_smers.data(), d_supermers, n_kmers * BUFF_SCALE * sizeof(keyType), cudaMemcpyDeviceToHost), __LINE__);
+	checkCuda (cudaMemcpy(h_send_slens.data(), d_slen, n_kmers * BUFF_SCALE * sizeof(unsigned char), cudaMemcpyDeviceToHost), __LINE__);
+	checkCuda (cudaMemcpy(owner_counter, d_owner_counter, nproc * sizeof(int) , cudaMemcpyDeviceToHost), __LINE__);
 
 	// size_t total_counter = 0;
 	// cout << rank << " smer distribution: ";
-	// for (int i = 0; i < nproc; ++i) {   
-	//     total_counter += owner_counter[i];    
-	//     cout << owner_counter[i] << " "; 
+	// for (int i = 0; i < nproc; ++i) {
+	//     total_counter += owner_counter[i];
+	//     cout << owner_counter[i] << " ";
 	//     // printf("GPU Supermer pack: output buffer: %d %d \n", owner_counter[i], total_counter);
 	// }
 	// cout << endl;
@@ -294,7 +296,7 @@ __global__ void cu_kcounter_smer(KeyValue* hashtable, const keyType* kvs, const 
 
 		//*kmers of the supermer*
 		for(int k = 0; k < (slen - klen + 1); ++k){
-			
+
 			keyType new_key = ((new_smer) >> (2*(31-(klen+k -1)))) & mask;//kvs[threadid];//.key;
 			keyType slot = cuda_murmur3_64(new_key) & (kHashTableCapacity-1);
 
@@ -336,19 +338,19 @@ void GPU_SP_buildCounter(KeyValue* pHashTable, vector<keyType> &recvbuf, vector<
 	unsigned char * d_slens;
 	keyType *d_smers;
 	// unsigned char * h_slens = (unsigned char *) malloc(num_keys * sizeof(unsigned char));
-	// checkCuda (cudaMemcpy(h_slens, d_slen, num_keys * sizeof(unsigned char), cudaMemcpyDeviceToHost), __LINE__); 
-	
-	checkCuda( cudaMalloc(&d_smers, sizeof(keyType) * totrecv), __LINE__); 
+	// checkCuda (cudaMemcpy(h_slens, d_slen, num_keys * sizeof(unsigned char), cudaMemcpyDeviceToHost), __LINE__);
+
+	checkCuda( cudaMalloc(&d_smers, sizeof(keyType) * totrecv), __LINE__);
 	checkCuda( cudaMalloc(&d_slens, sizeof(unsigned char) * totrecv), __LINE__);
-	
+
 	size_t num_keys = 0;
 
 	for(uint64_t i= 0; i < nprocs ; ++i) {
 		if(totrecv > 0) {
-			checkCuda( cudaMemcpy(d_smers + num_keys, &recvbuf[i * p_buff_len], sizeof(keyType) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__); 
-			checkCuda( cudaMemcpy(d_slens + num_keys, &recvbuf_len[i * p_buff_len], sizeof(unsigned char) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__); 
+			checkCuda( cudaMemcpy(d_smers + num_keys, &recvbuf[i * p_buff_len], sizeof(keyType) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__);
+			checkCuda( cudaMemcpy(d_slens + num_keys, &recvbuf_len[i * p_buff_len], sizeof(unsigned char) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__);
 		}
-		num_keys += recvcnt[i];	
+		num_keys += recvcnt[i];
 	}
 
 	int gridsize = ((uint32_t)num_keys + threadblocksize - 1) / threadblocksize;
@@ -364,7 +366,7 @@ void GPU_SP_buildCounter(KeyValue* pHashTable, vector<keyType> &recvbuf, vector<
 
 double tot_GPUsmer_alltoallv = 0;
 
-double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &len_smers, 
+double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &len_smers,
 	vector<keyType> &recvbuf, vector<unsigned char> &recvbuf_len,
 	int *sendcnt, int *recvcnt, int nkmers,  int * owner_counter)
 {
@@ -387,7 +389,7 @@ double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &l
 	// cout << "recv count " ;
 	for (int i=0; i < nprocs; i++) {
 		totrecv += recvcnt[i];
-		// cout << recvcnt[i] << " "; 
+		// cout << recvcnt[i] << " ";
 	}
 	// cout << endl;
 
@@ -404,8 +406,8 @@ double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &l
 		rdispls[i] = i * p_buff_len;
 	}
 
-	// uint64_t* recvbuf = (uint64_t*) malloc(nkmers * BUFF_SCALE * sizeof(uint64_t)); 
-	// unsigned char* recvbuf_len = (unsigned char*) malloc(nkmers * BUFF_SCALE * sizeof(unsigned char)); 
+	// uint64_t* recvbuf = (uint64_t*) malloc(nkmers * BUFF_SCALE * sizeof(uint64_t));
+	// unsigned char* recvbuf_len = (unsigned char*) malloc(nkmers * BUFF_SCALE * sizeof(unsigned char));
 
 	double exch_time = MPI_Wtime();
 	for (int i = 0; i < COMM_ITER; ++i)
@@ -418,22 +420,22 @@ double Exchange_GPUsupermers(vector<keyType> &outgoing, vector<unsigned char> &l
 
 	double performance_report_time = 0;//perf_reporting(exch_time, totsend, totrecv);
 
-	// checkCuda( cudaMalloc(&d_recv_smers, sizeof(keyType) * totrecv), __LINE__); 
+	// checkCuda( cudaMalloc(&d_recv_smers, sizeof(keyType) * totrecv), __LINE__);
 	// checkCuda( cudaMalloc(&d_recv_slens, sizeof(unsigned char) * totrecv), __LINE__);
 	// size_t num_keys = 0;
 
 	// for(uint64_t i= 0; i < nprocs ; ++i) {
 	// 	if(totrecv > 0) {
-	// 		checkCuda( cudaMemcpy(d_recv_smers + num_keys, &recvbuf[i * p_buff_len], sizeof(keyType) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__); 
-	// 		checkCuda( cudaMemcpy(d_recv_slens + num_keys, &recvbuf_len[i * p_buff_len], sizeof(unsigned char) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__); 
+	// 		checkCuda( cudaMemcpy(d_recv_smers + num_keys, &recvbuf[i * p_buff_len], sizeof(keyType) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__);
+	// 		checkCuda( cudaMemcpy(d_recv_slens + num_keys, &recvbuf_len[i * p_buff_len], sizeof(unsigned char) * recvcnt[i], cudaMemcpyHostToDevice), __LINE__);
 	// 	}
-	// 	num_keys += recvcnt[i];	
+	// 	num_keys += recvcnt[i];
 	// }
 
 	// if(totsend > 0)  {free(outgoing); free(len_smers);}
 	// if(totrecv > 0)  {free(recvbuf); free(recvbuf_len);}
 
-	delete(rdispls); delete(sdispls); 
+	delete(rdispls); delete(sdispls);
 	tot_exch_time=MPI_Wtime()-tot_exch_time; //-performance_report_time;
 
 	return tot_exch_time;

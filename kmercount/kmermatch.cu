@@ -21,7 +21,7 @@
 #include <cstring>
 #include <numeric>
 #include <vector>
-#include <sstream> 
+#include <sstream>
 #include <limits>
 #include <array>
 #include <tuple>
@@ -142,6 +142,8 @@ double tot_pack_GPU = 0.0, tot_exch_GPU = 0.0, tot_process_GPU = 0.0;
 
 int minimizer_ordering = 0;
 char* uhs_file_path;
+float uhs_sample_fraction = 0.01;
+long uhs_mpi_mode = 0;
 
 
 READIDS newReadIdList() {
@@ -202,7 +204,7 @@ string toString_custm(int64_t longs) {
 			case 0x00: *s = 'A'; ++s; break;
 			case 0x01: *s = 'C'; ++s; break;
 			case 0x02: *s = 'G'; ++s; break;
-			case 0x03: *s = 'T'; ++s; break;  
+			case 0x03: *s = 'T'; ++s; break;
 		}
 		// for (int ii = 0; ii < KMER_LENGTH; ii++)
 		// 	cout << s[ii];
@@ -218,7 +220,7 @@ static int exchange_iter = 0;
 int batch = -1;
 
 
-void getSupermers_CPU_DEBUG(char* seq, int klen, int mlen, int nproc, int *owner_counter, 
+void getSupermers_CPU_DEBUG(char* seq, int klen, int mlen, int nproc, int *owner_counter,
 		keyType* h_send_smers, unsigned char* h_send_slens, int n_kmers, int rank ){
 
 	unsigned int seq_len = strlen(seq);
@@ -229,7 +231,7 @@ void getSupermers_CPU_DEBUG(char* seq, int klen, int mlen, int nproc, int *owner
 	int grid = (seq_len + (128*window - 1) ) / (128*window);// * window;
 	// int per_block_seq_len = 128;
 	int order = 0;
-	cout << "info " << grid << " " << window << " " << n_kmers << endl; 
+	cout << "info " << grid << " " << window << " " << n_kmers << endl;
 
 	uint64_t counter = 0, match = 0;
 
@@ -239,25 +241,25 @@ void getSupermers_CPU_DEBUG(char* seq, int klen, int mlen, int nproc, int *owner
 		if((st_char_grid+klen - 1) >= n_kmers) break;
 
 		for(int b = 0; b < 128; ++b) {
-			validKmer = false; 
+			validKmer = false;
 			int st_char_block = st_char_grid + b * window;
 			if((st_char_block + klen - 1) >= n_kmers) break;
 
 			uint64_t comprs_Kmer = 0; keyType comprs_Smer = 0;
-			keyType cur_mini = std::numeric_limits<uint64_t>::max();  
-			keyType prev_mini = cur_mini;      		
+			keyType cur_mini = std::numeric_limits<uint64_t>::max();
+			keyType prev_mini = cur_mini;
 			int i = st_char_block; bool inserted = false;
 
-			int w = 0; 
+			int w = 0;
 			cout << "new window " << endl;
 			for(; w < window; w++) {
 				if((st_char_block + w +klen - 1) >= n_kmers) return;
-				char s; validKmer = false; 
-				uint64_t comprs_Kmer = 0; 
-				for (int k = 0; k < KMER_LENGTH; ++k) {			
+				char s; validKmer = false;
+				uint64_t comprs_Kmer = 0;
+				for (int k = 0; k < KMER_LENGTH; ++k) {
 
 					s = seq[ i + w + k];
-					if(s == 'a' || s == 'N') { 
+					if(s == 'a' || s == 'N') {
 						w+=KMER_LENGTH-1;
 						validKmer = false; break;
 					}
@@ -265,39 +267,39 @@ void getSupermers_CPU_DEBUG(char* seq, int klen, int mlen, int nproc, int *owner
 					int j = k % 32;
 					size_t x = ((s) & 4) >> 1;
 					comprs_Kmer |= ((x + ((x ^ (s & 2)) >>1)) << (2*(31-j))); //make it longs[] to support larger kmer
-				}		    
+				}
 				if(validKmer){
-					if(w == 0) {  
+					if(w == 0) {
 						cur_mini = find_minimizer(comprs_Kmer, order);
 						comprs_Smer = comprs_Kmer; //slen = klen;
 					}
-					else  {	 
-						cur_mini = find_minimizer(comprs_Kmer, order);   
+					else  {
+						cur_mini = find_minimizer(comprs_Kmer, order);
 
 						if(prev_mini == cur_mini ){
 							match++;
-							// validKmer = true; 
+							// validKmer = true;
 							if((i+w) < 50) cout << "GPU smer: matched: " << s << " " << cur_mini << " " << comprs_Kmer << " " << counter <<" " << w << endl;
 
-							inserted = false;                
+							inserted = false;
 						}
-						else {                      
+						else {
 							counter++;
 							if((i+w) < 50) cout << "GPU smer: new: " << s << " " << cur_mini << " " << comprs_Kmer << " " << counter <<" " << w << endl;
 
-							// validKmer = false; 
-							inserted = true;                  
+							// validKmer = false;
+							inserted = true;
 						}
 					}
-					prev_mini = cur_mini; 
+					prev_mini = cur_mini;
 				}
 				//         else{
-				//         	cur_mini = std::numeric_limits<uint64_t>::max();  
+				//         	cur_mini = std::numeric_limits<uint64_t>::max();
 				// prev_mini = cur_mini;
 				//         }
 				//             if((i + w + klen) >= n_kmers) {
-				//             	cout << "Similar CPU supermer: Total supermers: " <<  counter <<  " " << w <<endl;// if(i < 5)// toString_custm(kmers_compressed[i]);  
-				// 	return ; 
+				//             	cout << "Similar CPU supermer: Total supermers: " <<  counter <<  " " << w <<endl;// if(i < 5)// toString_custm(kmers_compressed[i]);
+				// 	return ;
 				// }
 				if(validKmer && w == window - 1  ) {
 					counter++;
@@ -305,19 +307,19 @@ void getSupermers_CPU_DEBUG(char* seq, int klen, int mlen, int nproc, int *owner
 
 
 					// cout << i+window << " " <<  n_kmers << " " << counter << endl;
-				}	
+				}
 			}
-			cout << "Similar CPU supermer: Total supermers: " <<  counter <<  " " << match<<endl; // if(i < 5)// toString_custm(kmers_compressed[i]);  
+			cout << "Similar CPU supermer: Total supermers: " <<  counter <<  " " << match<<endl; // if(i < 5)// toString_custm(kmers_compressed[i]);
 
 
 
 			// if(validKmer) counter++;
-		}		
+		}
 	}
 
-	cout << "Similar CPU supermer: Total supermers: " <<  counter <<  " " << match<<endl;// if(i < 5)// toString_custm(kmers_compressed[i]);  
+	cout << "Similar CPU supermer: Total supermers: " <<  counter <<  " " << match<<endl;// if(i < 5)// toString_custm(kmers_compressed[i]);
 
-	return ; 
+	return ;
 }
 
 keyType tmp_MurmurHash3_x64_128(const void* key, const uint32_t len, const uint32_t seed)
@@ -346,7 +348,7 @@ keyType tmp_MurmurHash3_x64_128(const void* key, const uint32_t len, const uint3
 		case 11: k2 ^= (uint64_t)(tail[10]) << 16;
 		case 10: k2 ^= (uint64_t)(tail[ 9]) << 8;
 		case  9: k2 ^= (uint64_t)(tail[ 8]) << 0;
-			 k2 *= c2; k2  =  (k2 << 33) | (k2 >> (64 - 33)) ;//ROTL64(k2,33); 
+			 k2 *= c2; k2  =  (k2 << 33) | (k2 >> (64 - 33)) ;//ROTL64(k2,33);
 			 k2 *= c1; h2 ^= k2;
 
 		case  8: k1 ^= (uint64_t)(tail[ 7]) << 56;
@@ -357,7 +359,7 @@ keyType tmp_MurmurHash3_x64_128(const void* key, const uint32_t len, const uint3
 		case  3: k1 ^= (uint64_t)(tail[ 2]) << 16;
 		case  2: k1 ^= (uint64_t)(tail[ 1]) << 8;
 		case  1: k1 ^= (uint64_t)(tail[ 0]) << 0;
-			 k1 *= c1; k1  = (k1 << 31) | (k1 >> (64 - 31)) ;//ROTL64(k1,31); 
+			 k1 *= c1; k1  = (k1 << 31) | (k1 >> (64 - 31)) ;//ROTL64(k1,31);
 			 k1 *= c2; h1 ^= k1;
 	};
 
@@ -401,7 +403,7 @@ keyType tmp_MurmurHash3_x64_128(const void* key, const uint32_t len, const uint3
 	return h1;
 }
 
-// std::unordered_map<uint64_t,uint64_t> kcounter_cpu; 
+// std::unordered_map<uint64_t,uint64_t> kcounter_cpu;
 
 // Kmer is of length k
 // HyperLogLog counting, bloom filtering, and std::maps use Kmer as their key
@@ -438,7 +440,7 @@ size_t ParseNPack(vector<string> & seqs, vector<string> names, vector<string> & 
 		kmersprocessed += nkmers;
 		kmersthisbatch += nkmers;
 
-		std::vector<Kmer> kmers = Kmer::getKmers(seqs[i]); // calculate all the kmers 
+		std::vector<Kmer> kmers = Kmer::getKmers(seqs[i]); // calculate all the kmers
 
 		ASSERT(kmers.size() == nkmers,"");
 		size_t Nfound = seqs[i].find('N');
@@ -455,7 +457,7 @@ size_t ParseNPack(vector<string> & seqs, vector<string> names, vector<string> & 
 		}
 		// if (pass == 2) { StoreReadName(readIndex, names[i], readNameMap); }
 		readIndex++; // always start with next read index whether exiting or continuing the loop
-		if (maxsending * bytesperentry >= (memoryThreshold) || (kmersthisbatch + seqs[i].length()) * bytesperentry >= (MAX_ALLTOALL_MEM)) { 
+		if (maxsending * bytesperentry >= (memoryThreshold) || (kmersthisbatch + seqs[i].length()) * bytesperentry >= (MAX_ALLTOALL_MEM)) {
 			nreads = i+1; // start with next read
 			// if (pass==2) { startReadIndex = readIndex; }
 			break;
@@ -490,15 +492,15 @@ size_t kmerCount_GPU(vector<string> & seqs, int pass, size_t offset, size_t endo
 	nkmers_thisBatch = 0;
 
 	//*concat all reads before copying to GPU*
-	for(size_t i=offset; i < nreads; ++i){	
-		
+	for(size_t i=offset; i < nreads; ++i){
+
 		if (seqs[i].length() <= KMER_LENGTH) continue;
 
 		nkmers_thisBatch += seqs[i].length() - KMER_LENGTH + 1;
 		int approx_maxsending = (4 * nkmers_thisBatch + nprocs - 1)/nprocs;
 		all_seqs += seqs[i] + "a";
 
-		// if (approx_maxsending * bytesperentry >= memoryThreshold || (nkmers_thisBatch + seqs[i].length()) * bytesperentry >= MAX_ALLTOALL_MEM) { 
+		// if (approx_maxsending * bytesperentry >= memoryThreshold || (nkmers_thisBatch + seqs[i].length()) * bytesperentry >= MAX_ALLTOALL_MEM) {
 		// 	nreads = i+1; // start with next read
 		// 	break;
 		// }
@@ -513,12 +515,12 @@ size_t kmerCount_GPU(vector<string> & seqs, int pass, size_t offset, size_t endo
 	vector <uint64_t> h_outgoing(nkmerDelim_thisBatch * BUFF_SCALE);
 	getKmers_GPU(all_seqs, h_outgoing, KMER_LENGTH, nprocs, owner_counter, myrank, BUFF_SCALE);
 	// getKmers_test(all_seqs);
-	
+
 	//* Exchange kmers * TODO:: GPU direct communication *
-	vector <keyType> recvbuf(nkmerDelim_thisBatch * BUFF_SCALE); 
+	vector <keyType> recvbuf(nkmerDelim_thisBatch * BUFF_SCALE);
 	int * recvcnt = new int[nprocs];
 
-	double exch_t_GPU = GPU_Exchange(recvbuf, h_outgoing, pass, nprocs, 
+	double exch_t_GPU = GPU_Exchange(recvbuf, h_outgoing, pass, nprocs,
 	nkmerDelim_thisBatch, owner_counter, nRecvdKmers, recvcnt); // outgoing arrays will be all empty, shouldn't crush
 	tot_exch_GPU += exch_t_GPU;
 
@@ -536,7 +538,7 @@ size_t kmerCount_GPU(vector<string> & seqs, int pass, size_t offset, size_t endo
 double perf_reporting(double exch_time, size_t totsend, size_t totrecv)
 {
 	double performance_report_time = MPI_Wtime();
-	
+
 	const int SND=0, RCV=1;
 	int64_t local_counts[2];
 	local_counts[SND] = totsend;
@@ -573,7 +575,7 @@ double tot_GPUsmer_build = 0, tot_GPUsmer_exch = 0, tot_GPU_smer_kcounter = 0;
 size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgoing, int pass, size_t offset, int endoffset, int minimizer_ordering, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count)
 {
 	double start_gpu_smer = MPI_Wtime();
-	uint64_t HTsize_smer = 0, totalPairs_smer = 0, all_seq_size = 0; 
+	uint64_t HTsize_smer = 0, totalPairs_smer = 0, all_seq_size = 0;
 	size_t nreads = endoffset;// seqs.size(), max_slen = 0;
 	size_t maxsending = 0, nkmers_smer_batch = 0;
 	size_t memoryThreshold = (MAX_ALLTOALL_MEM / nprocs) * 2; // 2x any single rank
@@ -589,16 +591,16 @@ size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgo
 	}
 	if(all_seq_size == 0) return nreads;
 
-	for(size_t i=offset; i < nreads; ++i){	
+	for(size_t i=offset; i < nreads; ++i){
 		size_t found  = seqs[i].length();
-		
+
 		if (seqs[i].length() <= KMER_LENGTH) continue;
 
 		nkmers_smer_batch += seqs[i].length() - KMER_LENGTH + 1;
 		int approx_maxsending = (4 * nkmers_thisBatch + nprocs - 1)/nprocs;
 		all_seqs += seqs[i] + "a";
 
-		// if (approx_maxsending * bytesperentry >= memoryThreshold || (nkmers_thisBatch + seqs[i].length()) * bytesperentry >= MAX_ALLTOALL_MEM) { 
+		// if (approx_maxsending * bytesperentry >= memoryThreshold || (nkmers_thisBatch + seqs[i].length()) * bytesperentry >= MAX_ALLTOALL_MEM) {
 		// 	nreads = i+1; // start with next read
 		// 	break;
 		// }
@@ -610,45 +612,45 @@ size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgo
 
 	std::vector<keyType> h_send_smers(nkmers_smer_batch * BUFF_SCALE);
 	std::vector<unsigned char> h_send_slens(nkmers_smer_batch * BUFF_SCALE);
-	
+
 	//* Build Supermers on GPU */
 
-	// getSupermers_CPU_DEBUG(seqs_arr, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, h_send_smers, h_send_slens, nkmers_smer_batch,  myrank);	
-	getSupermers_GPU(all_seqs, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, 
+	// getSupermers_CPU_DEBUG(seqs_arr, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter, h_send_smers, h_send_slens, nkmers_smer_batch,  myrank);
+	getSupermers_GPU(all_seqs, KMER_LENGTH, MINIMIZER_LENGTH, nprocs, owner_counter,
 		h_send_smers, h_send_slens, nkmers_smer_batch,  myrank, BUFF_SCALE,
 		minimizer_ordering, uhs_frequencies_hashtable, uhs_hashtable_capacity,
-		uhs_mmers, uhs_mmers_count);
+		uhs_sample_fraction, uhs_mmers, uhs_mmers_count, uhs_mpi_mode);
 	tot_GPUsmer_build += MPI_Wtime() -  start_gpu_smer ;
 
 	//* Exchange supermers on CPU */
 
-	vector<keyType> recvbuf (nkmers_smer_batch * BUFF_SCALE ); 
-	vector<unsigned char> recvbuf_len (nkmers_smer_batch * BUFF_SCALE ); 
-	
+	vector<keyType> recvbuf (nkmers_smer_batch * BUFF_SCALE );
+	vector<unsigned char> recvbuf_len (nkmers_smer_batch * BUFF_SCALE );
+
 	double exch_gpu_smer = Exchange_GPUsupermers(h_send_smers, h_send_slens, recvbuf,
 	recvbuf_len, sendcnt, recvcnt, nkmers_smer_batch, owner_counter);
 	tot_GPUsmer_exch += exch_gpu_smer;//MPI_Wtime() -  start_gpu_smer ;
 
-	//* Parse supermers and build kcounter on GPU */	
+	//* Parse supermers and build kcounter on GPU */
 
 	start_gpu_smer = MPI_Wtime();
 	size_t num_keys = 0;
-	for(uint64_t i= 0; i < nprocs ; ++i) 
-		num_keys += recvcnt[i];	
+	for(uint64_t i= 0; i < nprocs ; ++i)
+		num_keys += recvcnt[i];
 	nSupermers_all += num_keys;
 
 	int p_buff_len = ((nkmers_smer_batch * BUFF_SCALE) + nprocs - 1)/nprocs;
-	
+
 	GPU_SP_buildCounter(d_hashTable, recvbuf, recvbuf_len, recvcnt, num_keys, KMER_LENGTH,
 	 myrank, p_buff_len);
 	tot_GPU_smer_kcounter += MPI_Wtime() -  start_gpu_smer ;
 
 	//***** Correctness check of Kmer counter *****
 	std::vector<KeyValue> h_pHashTable(kHashTableCapacity);
-	cudaMemcpy(h_pHashTable.data(), d_hashTable, sizeof(KeyValue) * kHashTableCapacity, cudaMemcpyDeviceToHost); 
+	cudaMemcpy(h_pHashTable.data(), d_hashTable, sizeof(KeyValue) * kHashTableCapacity, cudaMemcpyDeviceToHost);
 
 	for (int i = 0; i < kHashTableCapacity; ++i){
-		if (h_pHashTable[i].value > 0) { //kEmpty  		
+		if (h_pHashTable[i].value > 0) { //kEmpty
 			HTsize_smer++;
 			totalPairs_smer += h_pHashTable[i].value;
 		}
@@ -664,7 +666,7 @@ size_t spmer_kmerCount_GPU(vector<string> & seqs, vector< vector<Kmer> > & outgo
 	CHECK_MPI( MPI_Reduce(&nkmers_smer_all, &allrank_kmersprocessed, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD) );
 
 	if(myrank == 0){
-	  	cout << "\nBatch: " << batch <<" - Smer based: GPU HTsize: " << allrank_hashsize << ", #kmers from HT: " << allrank_totalPairs 
+	  	cout << "\nBatch: " << batch <<" - Smer based: GPU HTsize: " << allrank_hashsize << ", #kmers from HT: " << allrank_totalPairs
 		<< " expected #kmers " << allrank_kmersprocessed << endl;
 	}
 
@@ -789,7 +791,7 @@ double Exchange(vector< vector<Kmer> > & outgoing, vector< vector< ReadId > > & 
 	uint64_t nkmersrecvd = totrecv / bytesperentry;
 	for(uint64_t i= 0; i < nkmersrecvd; ++i) {
 		Kmer kk;
-		kk.copyDataFrom(recvbuf + (i * bytesperentry));	
+		kk.copyDataFrom(recvbuf + (i * bytesperentry));
 		mykmers.push_back(kk);
 
 		if (pass == 2) {
@@ -867,7 +869,7 @@ MoreHLLTimers InsertIntoHLL(vector<string> & seqs, vector<string> & quals, Hyper
 				if (extraTimers) t.lexKmerTime += getDuration(t);
 				hll.add((const char*) lexsmall.getBytes(), lexsmall.getNumBytes());
 				if (extraTimers) t.hllTime += getDuration(t);
-#ifdef HEAVYHITTERS 
+#ifdef HEAVYHITTERS
 				if (heavyhitters) heavyhitters->Push(lexsmall);
 				if (extraTimers) t.hhTime += getDuration(t);
 #endif
@@ -911,7 +913,7 @@ void ProudlyParallelCardinalityEstimate(const vector<filedata> & allfiles, doubl
 		int idx = itr - allfiles.begin();
 		ParallelFASTQ pfq;
 		pfq.open(itr->filename, cached_io, base_dir, itr->filesize);
-		// The fastq file is read line by line, so the number of records processed in a block 
+		// The fastq file is read line by line, so the number of records processed in a block
 		// shouldn't make any difference, so we can just set this to some arbitrary value.
 		// The value 262144 is for records with read lengths of about 100.
 		size_t upperlimit = MAX_ALLTOALL_MEM / 16;
@@ -930,7 +932,7 @@ void ProudlyParallelCardinalityEstimate(const vector<filedata> & allfiles, doubl
 			ASSERT(seqs.size() == quals.size(),"");
 			for (int i = 0; i < seqs.size(); i++) {
 				if (seqs[i].length() != quals[i].length()) {
-					DIE("sequence length %lld != quals length %lld\n%s\n", 
+					DIE("sequence length %lld != quals length %lld\n%s\n",
 							(lld) seqs[i].length(), (lld) quals[i].length(), seqs[i].c_str());
 				}
 			}
@@ -950,7 +952,7 @@ void ProudlyParallelCardinalityEstimate(const vector<filedata> & allfiles, doubl
 		pfq_times[ idx ] = pfq.get_elapsed_time();
 
 #ifdef HEAVYHITTERS
-		if (heavyhitters) 
+		if (heavyhitters)
 			HH_reduce_times[ idx ] = heavyhitters->GetReduceTime() - (idx == 0 ? 0.0 : HH_reduce_times[idx-1]);
 		else
 			HH_reduce_times[idx] = 0.0;
@@ -1093,9 +1095,9 @@ class KmerInfo {
 		// returns true if in bloom, does not modify
 		bool checkBloom(struct bloom *bm) {
 			MPI_Pcontrol(1,"BloomFilter");
-			bool inBloom = bloom_check(bm, kmer.getBytes(), kmer.getNumBytes()) == 1; 
+			bool inBloom = bloom_check(bm, kmer.getBytes(), kmer.getNumBytes()) == 1;
 			MPI_Pcontrol(-1,"BloomFilter");
-			return inBloom;	
+			return inBloom;
 		}
 		// returns true if in bloom, inserts if not
 		bool checkBloomAndRemember(struct bloom *bm) {
@@ -1125,9 +1127,9 @@ class KmerInfo {
 					kmercounts->insert(make_pair(kmer.getArray(), make_tuple(newReadIdList(), newPositionsList(), 0)));
 #endif
 					// if (andCount) includeCount(false);
-				} 
+				}
 				else {
-					// if (andCount) includeCount(got); 
+					// if (andCount) includeCount(got);
 				}
 				MPI_Pcontrol(-1,"InsertOrUpdate");
 			}
@@ -1283,7 +1285,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 			uhs_file_path,
 			MINIMIZER_LENGTH,
 			myrank,
-			&uhs_hashtable_capacity
+			&uhs_hashtable_capacity,
 			&uhs_mmers,
 			&uhs_mmers_count
 		);
@@ -1372,8 +1374,8 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 			size_t offset = 0;
 			do { // extract kmers and counts from read sequences (seqs)
 				DBG("Starting Exchange - ParseNPack %lld (%lld)\n", (lld) offset, (lld) seqs.size());
-				batch++; 
-				if(myrank == 0) printf("\n\n**** Starting batch:  %d\n",  batch); 
+				batch++;
+				if(myrank == 0) printf("\n\n**** Starting batch:  %d\n",  batch);
 				int tmp_offset = offset;
 
 				double exch_start_t = MPI_Wtime();
@@ -1416,7 +1418,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 
 				// #endif
 				moreToExchange = offset < seqs.size(); // TODO make sure this isn't problematic in long read version
-		
+
 				mykmers.clear();
 				myreadids.clear();
 				mypositions.clear();
@@ -1455,7 +1457,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 	double tots[6], gtots[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 	double tots_GPU[8], gtots_GPU[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 	tots[0] = pfqTime;
-	tots[1] = tot_pack; 
+	tots[1] = tot_pack;
 	tots[2] = tot_exch;
 	tots[3] = tot_process;
 	tots[4] = tot_raw;
@@ -1483,13 +1485,13 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 	//       // cout << __FUNCTION__ << " pass " << pass << ": Average time taken for other FASTQ processing is " << (gtots[4] / num_ranks) << ", myelapsed " << tots[4] << endl;
 	//       // cout << __FUNCTION__ << " pass " << pass << ": Average time taken for elapsed is " << (gtots[5] / num_ranks) << ", myelapsed " << tots[5] << endl;
 	// //   	cout << "\nTimings on GPU KMER:\n";
-	// //   	cout << __FUNCTION__ << " pass " << pass << ": Average time taken for packing reads on GPU (incl. memcpy) is " << (gtots_GPU[0] / num_ranks) << ", myelapsed " << tots[1] << endl;   
-	// //       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for xchanging reads on GPU is " << (gtots_GPU[1] / num_ranks) << ", myelapsed " << tots[1] << endl;   
-	// //       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for processing reads (Kmer count) on GPU is " << (gtots_GPU[2] / num_ranks) << ", myelapsed " << tots[1] << endl;   
+	// //   	cout << __FUNCTION__ << " pass " << pass << ": Average time taken for packing reads on GPU (incl. memcpy) is " << (gtots_GPU[0] / num_ranks) << ", myelapsed " << tots[1] << endl;
+	// //       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for xchanging reads on GPU is " << (gtots_GPU[1] / num_ranks) << ", myelapsed " << tots[1] << endl;
+	// //       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for processing reads (Kmer count) on GPU is " << (gtots_GPU[2] / num_ranks) << ", myelapsed " << tots[1] << endl;
 	//       cout << "\nTimings on GPU supermer:\n";
-	//   	cout << __FUNCTION__ << " pass " << pass << ": Average time taken for build supermer on GPU (incl. memcpy) is " << (gtots_GPU[3] / num_ranks) << ", myelapsed " << tots[1] << endl;   
-	//       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for xchanging smer on GPU is " << (gtots_GPU[4] / num_ranks) << ", myelapsed " << tots[1] << endl;   
-	//       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for Kmer count on GPU is " << (gtots_GPU[5] / num_ranks) << ", myelapsed " << tots[1] << endl;   
+	//   	cout << __FUNCTION__ << " pass " << pass << ": Average time taken for build supermer on GPU (incl. memcpy) is " << (gtots_GPU[3] / num_ranks) << ", myelapsed " << tots[1] << endl;
+	//       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for xchanging smer on GPU is " << (gtots_GPU[4] / num_ranks) << ", myelapsed " << tots[1] << endl;
+	//       cout << __FUNCTION__ << " pass " << pass << ": Average time taken for Kmer count on GPU is " << (gtots_GPU[5] / num_ranks) << ", myelapsed " << tots[1] << endl;
 
 
 	//   	printf("IN: Finished Pass %d, Freeing bloom and other memory. kmercounts: %lld entries\n", pass, (lld) kmercounts->size());
@@ -1534,10 +1536,10 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 
 		size_t HTsize_GPU = 0, kmersFromHT_GPU = 0;
 		std::vector<KeyValue> h_pHashTable(kHashTableCapacity);
-		cudaMemcpy(h_pHashTable.data(), d_hashTable, sizeof(KeyValue) * kHashTableCapacity, cudaMemcpyDeviceToHost); 
+		cudaMemcpy(h_pHashTable.data(), d_hashTable, sizeof(KeyValue) * kHashTableCapacity, cudaMemcpyDeviceToHost);
 
 		for (int i = 0; i < kHashTableCapacity; ++i){
-			if (h_pHashTable[i].value > 0) { // if (hosthash[i].value > 1 && hosthash[i].value < 8) { //kEmpty 
+			if (h_pHashTable[i].value > 0) { // if (hosthash[i].value > 1 && hosthash[i].value < 8) { //kEmpty
 				HTsize_GPU++;
 				kmersFromHT_GPU += h_pHashTable[i].value;
 			}
@@ -1556,20 +1558,20 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				CHECK_MPI( MPI_Comm_size(MPI_COMM_WORLD, &num_ranks) );
 
 				if(type == 1) { // K-mer based
-					cout << "\nGPU - K-mer based: HTsize: " << allrank_hashsize << ", #kmers from HT: " << allrank_totalPairs 
+					cout << "\nGPU - K-mer based: HTsize: " << allrank_hashsize << ", #kmers from HT: " << allrank_totalPairs
 						<< " expected #kmers " << allrank_kmersprocessed << endl;
-					cout << "Avg timings: parse&pack: " << (gtots_GPU[0] / num_ranks) << ", exchange K-mers: " <<  (gtots_GPU[1] / num_ranks) 
+					cout << "Avg timings: parse&pack: " << (gtots_GPU[0] / num_ranks) << ", exchange K-mers: " <<  (gtots_GPU[1] / num_ranks)
 						<< ", build kcounter: " << (gtots_GPU[2] / num_ranks) << ", alltoallv(): " << (gtots_GPU[3] / num_ranks) << endl;
 				}
 
 				else { // smer based
-					cout << "\nGPU - Smer based: HTsize: " << allrank_hashsize << ", #kmers from HT: " << allrank_totalPairs 
+					cout << "\nGPU - Smer based: HTsize: " << allrank_hashsize << ", #kmers from HT: " << allrank_totalPairs
 						<< " expected #kmers " << allrank_kmersprocessed << ", #supermers "<< allrank_nsmers <<  endl;
-					cout << "Avg timings: Build smer: " << (gtots_GPU[4] / num_ranks) << ", exchange smers: " <<  (gtots_GPU[5] / num_ranks) 
+					cout << "Avg timings: Build smer: " << (gtots_GPU[4] / num_ranks) << ", exchange smers: " <<  (gtots_GPU[5] / num_ranks)
 						<< ", build kcounter: " << (gtots_GPU[6] / num_ranks) << ", alltoallv(): " << (gtots_GPU[7] / num_ranks) << endl;
 				}
 			}
-			destroy_hashtable(d_hashTable, myrank); 
+			destroy_hashtable(d_hashTable, myrank);
 		}
 
 		if(myrank == 0) {
@@ -1591,6 +1593,11 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 
 		if (exchangeAndCountPass == 2) {
 			countTotalKmersAndCleanHash();
+		}
+
+		if (minimizer_ordering == 1) {
+			cudaFree(uhs_frequencies_hashtable);
+			cudaFree(uhs_mmers);
 		}
 
 		return nReads;
@@ -1653,7 +1660,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 					int heavyitems = 0;
 					int millioncaught = 0;
 					int64_t heavycounts = 0;
-#ifdef USE_UPC_ALLOCATOR_IN_MPI 
+#ifdef USE_UPC_ALLOCATOR_IN_MPI
 					KmerAllocator::startUPC();
 #endif
 					for(size_t i=0; i<nfreqs; ++i) {
@@ -1666,7 +1673,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 						if(owner == myrank) {
 							bool inserted = false, merged = false;
 							auto iter = kmercounts->find( kmer.getArray() );
-							if (iter != kmercounts->end()) { 
+							if (iter != kmercounts->end()) {
 #ifdef KHASH
 								KmerCountType &kct = *iter;
 #else
@@ -1718,7 +1725,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 						}
 					}
 					delete [] Frequents;    // free memory
-#ifdef USE_UPC_ALLOCATOR_IN_MPI 
+#ifdef USE_UPC_ALLOCATOR_IN_MPI
 					KmerAllocator::endUPC();
 #endif
 					if (heavyhitters) {
@@ -1784,12 +1791,12 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 #ifdef KHASH
 						auto newitr = itr;
 						++newitr;
-						kmercounts->erase(itr);	// amortized constant	
+						kmercounts->erase(itr);	// amortized constant
 						// Iterators, pointers and references referring to elements removed by the function are invalidated.
 						// All other iterators, pointers and references keep their validity.
 #else
 						// C++11 style erase returns next iterator after erased entry
-						itr = kmercounts->erase(itr);	// amortized constant	
+						itr = kmercounts->erase(itr);	// amortized constant
 #endif
 					} else {
 						nonerrorkmers += allcount;
@@ -1804,8 +1811,8 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				hist[0] = kmersprocessed - overonecount;	// over-ride the value for 1, which wasn't correct anyway
 #endif
 
-				CHECK_MPI( MPI_Reduce(&nonerrorkmers, &totalnonerror, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD) ); 
-				CHECK_MPI( MPI_Reduce(&hashsize, &distinctnonerror, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD) ); 
+				CHECK_MPI( MPI_Reduce(&nonerrorkmers, &totalnonerror, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD) );
+				CHECK_MPI( MPI_Reduce(&hashsize, &distinctnonerror, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD) );
 				if(myrank == 0) {
 					cout << __FUNCTION__ << ": Erroneous count < " << ERR_THRESHOLD  << " and high frequency > "<< reliable_max <<" cases removed " << endl;
 					cout << __FUNCTION__ << ": Kmerscount hash includes " << distinctnonerror << " distinct elements" << endl;
@@ -1904,7 +1911,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				int max_num_seeds = -1;
 
 				option_t *this_opt;
-				option_t *opt_list = GetOptList(argc, argv, "i:e:u:p:BHESaP:k:x:y:m:q:d:t:w:n:f:");
+				option_t *opt_list = GetOptList(argc, argv, "i:e:u:p:BHESaP:k:x:y:m:q:d:t:w:n:h:f:M:");
 				print_args(opt_list, __func__);
 
 				while (opt_list) {
@@ -1980,12 +1987,18 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 								  }
 								  break;
 							  }
-                        case 'f':
+                        case 'h':
                             minimizer_ordering = 1;
                             uhs_file_path = this_opt->argument;
                             break;
+                        case 'f':
+                        	uhs_sample_fraction = strtof(this_opt->argument, NULL);
+                        	break;
+                        case 'M':
+                        	uhs_mpi_mode = strtol(this_opt->argument, NULL, 10);
+                        	break;
 						default:
-							  opt_err = true;
+							opt_err = true;
 					}
 				}
 
@@ -2163,7 +2176,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				serial_printf("%s: 2nd input data pass, elapsed time: %0.3f s\n", __FUNCTION__, time_second_data_pass);
 				time_temp = MPI_Wtime();
 
-				int64_t sendbuf = kmercounts->size(); 
+				int64_t sendbuf = kmercounts->size();
 				int64_t recvbuf, totcount, maxcount;
 				CHECK_MPI( MPI_Exscan(&sendbuf, &recvbuf, 1, MPI_LONG_LONG, MPI_SUM, MPI_COMM_WORLD) );
 				CHECK_MPI( MPI_Allreduce(&sendbuf, &totcount, 1, MPI_LONG_LONG, MPI_SUM, MPI_COMM_WORLD) );
@@ -2173,7 +2186,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				time_computing_loadimbalance = MPI_Wtime() - time_temp;
 				if(myrank  == 0) {
 					cout << __FUNCTION__ << ": Total number of stored k-mers: " << totcount << endl;
-					double imbalance = static_cast<double>(nprocs * maxcount) / static_cast<double>(totcount);  
+					double imbalance = static_cast<double>(nprocs * maxcount) / static_cast<double>(totcount);
 					cout << __FUNCTION__ << ": Load imbalance for final k-mer counts: " << imbalance << endl;
 					cout << __FUNCTION__ << ": CardinalityEstimate " << static_cast<double>(totkmersprocessed) / (MEGA * max((time_first_data_pass),0.001) * nprocs) << " MEGA k-mers per sec/proc in " << (time_first_data_pass) << " seconds"<< endl;
 					cout << __FUNCTION__ << ": Bloom filter + hash pre-allocation  " << static_cast<double>(totkmersprocessed) / (MEGA * max((time_second_data_pass),0.001) * nprocs) << " MEGA k-mers per sec/proc in " << (time_second_data_pass) << " seconds" << endl;
@@ -2246,11 +2259,11 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 #ifdef KHASH
 				kmercounts->free();
 #else
-#ifdef USE_UPC_ALLOCATOR_IN_MPI 
+#ifdef USE_UPC_ALLOCATOR_IN_MPI
 				KmerAllocator::startUPC();
 #endif
 				kmercounts->clear();
-#ifdef USE_UPC_ALLOCATOR_IN_MPI 
+#ifdef USE_UPC_ALLOCATOR_IN_MPI
 				KmerAllocator::endUPC();
 #endif
 #endif
@@ -2358,7 +2371,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 						DIE("Could not write the full number of bytes to file %s: expected %lld, got %lld\n", fname, (lld) bytes2write, (lld) bytesWritten);
 					GZIP_CLOSE(UFX_f);
 
-					// now write the total size to file - because we cannot use the mpi functions in 
+					// now write the total size to file - because we cannot use the mpi functions in
 					// readufx.cpp which is used by numerous upc stages to read in the ufx binary data
 					int64_t totalufxcount;
 					CHECK_MPI(MPI_Allreduce(&ufxcount64bit, &totalufxcount, 1, MPI_INT64_T, MPI_SUM, MPI_COMM_WORLD));
@@ -2385,7 +2398,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 				if(myrank == 0)	cout << "File write completed\n";
 				time_temp = MPI_Wtime();
 
-				if (!cached_io) 
+				if (!cached_io)
 				{
 					if(prefix != "")
 					{
@@ -2448,7 +2461,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 						{
 							cerr << "Problem reading binary input file\n";
 							return 1;
-						}	
+						}
 						for(int i=0; i< 10; ++i)
 						{
 							int64_t randindex  = distribution(generator);
@@ -2457,7 +2470,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 							fread(&upack, dsize, 1, f);
 							Kmer kmer(upack.arr);
 							cout << "LOC " << randindex << ":\t" << kmer.toString() << "\t\t";
-						} 
+						}
 #endif // #ifdef DEBUG__DISABLED
 					}
 				}// !cached_io
@@ -2479,7 +2492,7 @@ size_t ProcessFiles(const vector<filedata> & allfiles, int pass, double & cardin
 
 #ifndef SINGLE_EXEC
 
-			int main(int argc, char **argv) 
+			int main(int argc, char **argv)
 			{
 
 				CHECK_MPI( MPI_Init(&argc, &argv) );

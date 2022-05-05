@@ -2,6 +2,8 @@
 
 #include <fstream>
 
+#include <mpi.h>
+
 
 
 uhs_hashtable_slot* new_uhs_hashtable(int hashtable_capacity, int myrank) {
@@ -49,10 +51,10 @@ __device__ uhs_key_t mmer_numeric_at_gpu(int start_index, int m, const char* uhs
 }
 
 
-__global__ void populate_uhs_hashtable_keys_gpu(const char* uhs_string, int MINIMIZER_LENGTH, int mmers_count, uhs_hashtable_slot* uhs_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count) {
+__global__ void populate_uhs_hashtable_keys_gpu(const char* uhs_string, int MINIMIZER_LENGTH, uhs_hashtable_slot* uhs_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count) {
 
 	unsigned int thread_id = (blockIdx.x * blockDim.x) + threadIdx.x;
-	if (thread_id >= mmers_count) {
+	if (thread_id >= uhs_mmers_count) {
 		return;
 	}
 
@@ -64,8 +66,8 @@ __global__ void populate_uhs_hashtable_keys_gpu(const char* uhs_string, int MINI
 	uint32_t slot_index = (cuda_murmur3_64(mmer_numeric) & (uhs_hashtable_capacity - 1));
 
 	while (true) {
-		uhs_key_t old_key = atomicCAS(&(uhs_hashtable[slot_index].key), uhs_key_empty, mmer_numeric);
-		if (old_key == uhs_key_empty || old_key == mmer_numeric) {
+		uhs_key_t old_key = atomicCAS(&(uhs_hashtable[slot_index].key), 0, mmer_numeric);
+		if (old_key == 0 || old_key == mmer_numeric) {
 			return;
 		}
 		slot_index = ((slot_index + 1) & (uhs_hashtable_capacity - 1));
@@ -74,7 +76,7 @@ __global__ void populate_uhs_hashtable_keys_gpu(const char* uhs_string, int MINI
 }
 
 
-uhs_hashtable_slot* initialize_uhs_frequencies_hashtable(char* uhs_file_path, int MINIMIZER_LENGTH, int myrank, uint64_t* output_uhs_hashtable_capacity, uhs_key_t* output_uhs_mmers, uint64_t* output_uhs_mmers_count) {
+uhs_hashtable_slot* initialize_uhs_frequencies_hashtable(char* uhs_file_path, int MINIMIZER_LENGTH, int myrank, uint64_t* output_uhs_hashtable_capacity, uhs_key_t** output_uhs_mmers, uint64_t* output_uhs_mmers_count) {
 
 	std::string uhs_string = uhs_string_from_file(uhs_file_path);
 
@@ -85,11 +87,11 @@ uhs_hashtable_slot* initialize_uhs_frequencies_hashtable(char* uhs_file_path, in
 
 	int uhs_mmers_count = (uhs_string.length() / MINIMIZER_LENGTH);
 
-	uhs_key_t* uhs_mmers;
+	uhs_key_t* uhs_mmers = NULL;
 	cudaMalloc(((void**) &uhs_mmers), (uhs_mmers_count * sizeof(uhs_key_t)));
 
 	uint64_t uhs_hashtable_capacity = 1;
-	while (uhs_hashtable_capacity < ((uint64_t) mmers_count)) {
+	while (uhs_hashtable_capacity < ((uint64_t) uhs_mmers_count)) {
 		uhs_hashtable_capacity *= 2;
 	}
 
@@ -104,12 +106,11 @@ uhs_hashtable_slot* initialize_uhs_frequencies_hashtable(char* uhs_file_path, in
 		0,
 		0
 	);
-	int grid_size = ((mmers_count + (thread_block_size - 1)) / thread_block_size);
+	int grid_size = ((uhs_mmers_count + (thread_block_size - 1)) / thread_block_size);
 
 	populate_uhs_hashtable_keys_gpu<<<grid_size, thread_block_size>>>(
 		uhs_string_gpu,
 		MINIMIZER_LENGTH,
-		mmers_count,
 		uhs_frequencies_hashtable,
 		uhs_hashtable_capacity,
 		uhs_mmers,
@@ -136,12 +137,28 @@ __device__ uhs_value_t get_mmer_frequency_gpu(uhs_key_t mmer_numeric, uhs_hashta
 			uhs_value_t frequency = uhs_frequencies_hashtable[slot_index].value;
 			return frequency;
 		}
-		else if (slot_key == uhs_key_empty) {
-			return uhs_value_empty;
+		else if (slot_key == 0) {
+			return 1000000000;
 		}
 		slot_index = ((slot_index + 1) & (uhs_hashtable_capacity - 1));
 	}
-	return uhs_value_empty;
+	return 1000000000;
+}
+
+
+__device__ void set_mmer_frequency_gpu(uhs_key_t mmer_numeric, uhs_value_t new_frequency, uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity) {
+	uint32_t slot_index = (cuda_murmur3_64(mmer_numeric) & (uhs_hashtable_capacity - 1));
+	while (true) {
+		keyType slot_key = uhs_frequencies_hashtable[slot_index].key;
+		if (slot_key == mmer_numeric) {
+			uhs_frequencies_hashtable[slot_index].value = new_frequency;
+			return;
+		}
+		else if (slot_key == 0) {
+			return;
+		}
+		slot_index = ((slot_index + 1) & (uhs_hashtable_capacity - 1));
+	}
 }
 
 
@@ -154,7 +171,7 @@ __device__ void increment_mmer_frequency_gpu(uhs_key_t mmer_numeric, uhs_hashtab
 			atomicAdd(&(uhs_frequencies_hashtable[slot_index].value), 1);
 			return;
 		}
-		else if (slot_key == uhs_key_empty) {
+		else if (slot_key == 0) {
 			return;
 		}
 		slot_index = ((slot_index + 1) & (uhs_hashtable_capacity - 1));
@@ -201,49 +218,118 @@ void set_uhs_frequencies_from_sample(char* sequence, unsigned int sequence_lengt
 
 
 
-__global__ void reset_uhs_hashtable_frequencies_gpu(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t uhs_mmers, uint64_t uhs_mmers_count) {
-	
+__global__ void reset_uhs_frequencies_gpu(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count) {
+
 	unsigned int thread_id = (blockIdx.x * blockDim.x) + threadIdx.x;
 	if (thread_id >= uhs_mmers_count) {
 		return;
 	}
 
 	uhs_key_t mmer_numeric = uhs_mmers[thread_id];
-
-	uint32_t slot_index = (cuda_murmur3_64(mmer_numeric) & (uhs_hashtable_capacity - 1));
-	while (true) {
-		keyType slot_key = uhs_frequencies_hashtable[slot_index].key;
-		if (slot_key == mmer_numeric) {
-			uhs_frequencies_hashtable[slot_index].value = 0;
-			return;
-		}
-		else if (slot_key == uhs_key_empty) {
-			return;
-		}
-		slot_index = ((slot_index + 1) & (uhs_hashtable_capacity - 1));
-	}
+	set_mmer_frequency_gpu(mmer_numeric, 0, uhs_frequencies_hashtable, uhs_hashtable_capacity);
 
 }
 
 
-void reset_uhs_hashtable_frequencies(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t uhs_mmers, uint64_t uhs_mmers_count) {
-	
+void reset_uhs_frequencies(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count) {
+
 	int min_grid_size;
 	int thread_block_size;
 	cudaOccupancyMaxPotentialBlockSize(
 		&min_grid_size,
 		&thread_block_size,
-		set_uhs_frequencies_from_sample_gpu,
+		reset_uhs_frequencies_gpu,
 		0,
 		0
 	);
 	int grid_size = ((uhs_mmers_count + (thread_block_size - 1)) / thread_block_size);
 
-	reset_uhs_hashtable_frequencies_gpu<<<grid_size, thread_block_size>>>(
+	reset_uhs_frequencies_gpu<<<grid_size, thread_block_size>>>(
 		uhs_frequencies_hashtable,
 		uhs_hashtable_capacity,
 		uhs_mmers,
 		uhs_mmers_count
 	);
+
+}
+
+
+
+__global__ void populate_uhs_frequencies_array_gpu(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count, uhs_value_t* mmer_frequencies) {
+
+	unsigned int thread_id = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (thread_id >= uhs_mmers_count) {
+		return;
+	}
+
+	uhs_key_t mmer_numeric = uhs_mmers[thread_id];
+	mmer_frequencies[thread_id] = get_mmer_frequency_gpu(mmer_numeric, uhs_frequencies_hashtable, uhs_hashtable_capacity);
+
+}
+
+__global__ void repopulate_uhs_hashtable_values_from_array_gpu(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count, uhs_value_t* mmer_frequencies) {
+
+	unsigned int thread_id = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (thread_id >= uhs_mmers_count) {
+		return;
+	}
+
+	uhs_key_t mmer_numeric = uhs_mmers[thread_id];
+	set_mmer_frequency_gpu(mmer_numeric, mmer_frequencies[thread_id], uhs_frequencies_hashtable, uhs_hashtable_capacity);
+
+}
+
+
+void allreduce_uhs_frequencies(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count, long mpi_mode) {
+
+	size_t mmer_frequencies_size = (uhs_mmers_count * sizeof(uhs_value_t));
+	uhs_value_t* mmer_frequencies_local = ((uhs_value_t*) malloc(mmer_frequencies_size));
+	uhs_value_t* mmer_frequencies_gpu;
+	uhs_value_t* mmer_frequencies_total = ((uhs_value_t*) malloc(mmer_frequencies_size));
+	cudaMalloc(&mmer_frequencies_gpu, mmer_frequencies_size);
+
+	int min_grid_size;
+	int thread_block_size;
+	cudaOccupancyMaxPotentialBlockSize(
+		&min_grid_size,
+		&thread_block_size,
+		populate_uhs_frequencies_array_gpu,
+		0,
+		0
+	);
+	int grid_size = ((uhs_mmers_count + (thread_block_size - 1)) / thread_block_size);
+
+	populate_uhs_frequencies_array_gpu<<<grid_size, thread_block_size>>>(
+		uhs_frequencies_hashtable,
+		uhs_hashtable_capacity,
+		uhs_mmers,
+		uhs_mmers_count,
+		mmer_frequencies_gpu
+	);
+
+	cudaMemcpy(mmer_frequencies_local, mmer_frequencies_gpu, mmer_frequencies_size, cudaMemcpyDeviceToHost);
+
+	MPI_Allreduce(
+		mmer_frequencies_local,
+		mmer_frequencies_total,
+		uhs_mmers_count,
+		MPI_UINT32_T,
+		MPI_SUM,
+		MPI_COMM_WORLD
+	);
+
+	cudaMemcpy(mmer_frequencies_gpu, mmer_frequencies_total, mmer_frequencies_size, cudaMemcpyHostToDevice);
+
+	repopulate_uhs_hashtable_values_from_array_gpu<<<grid_size, thread_block_size>>>(
+		uhs_frequencies_hashtable,
+		uhs_hashtable_capacity,
+		uhs_mmers,
+		uhs_mmers_count,
+		mmer_frequencies_gpu
+	);
+
+	free(mmer_frequencies_local);
+	cudaFree(mmer_frequencies_gpu);
+	free(mmer_frequencies_total);
 
 }

@@ -13,9 +13,6 @@ typedef struct uhs_hashtable_slot {
 	uhs_value_t value;
 } uhs_hashtable_slot;
 
-uhs_key_t uhs_key_empty = 0;
-uhs_value_t uhs_value_empty = 1000000000;
-
 
 
 uhs_hashtable_slot* initialize_uhs_frequencies_hashtable(
@@ -23,9 +20,11 @@ uhs_hashtable_slot* initialize_uhs_frequencies_hashtable(
 	int MINIMIZER_LENGTH,
 	int myrank,
 	uint64_t* output_uhs_hashtable_capacity,
-	uhs_key_t* output_uhs_mmers,
+	uhs_key_t** output_uhs_mmers,
 	uint64_t* output_uhs_mmers_count
 );
+
+
 
 __device__ uhs_value_t get_mmer_frequency_gpu(
 	uhs_key_t mmer_numeric,
@@ -33,7 +32,9 @@ __device__ uhs_value_t get_mmer_frequency_gpu(
 	uint64_t uhs_hashtable_capacity
 );
 
-void reset_uhs_hashtable_frequencies(
+
+
+void reset_uhs_frequencies(
 	uhs_hashtable_slot* uhs_frequencies_hashtable,
 	uint64_t uhs_hashtable_capacity,
 	uhs_key_t* uhs_mmers,
@@ -47,6 +48,14 @@ void set_uhs_frequencies_from_sample(
 	int MINIMIZER_LENGTH,
 	uhs_hashtable_slot* uhs_frequencies_hashtable,
 	uint64_t uhs_hashtable_capacity
+);
+
+void allreduce_uhs_frequencies(
+	uhs_hashtable_slot* uhs_frequencies_hashtable,
+	uint64_t uhs_hashtable_capacity,
+	uhs_key_t* uhs_mmers,
+	uint64_t uhs_mmers_count,
+	long mpi_mode
 );
 
 
