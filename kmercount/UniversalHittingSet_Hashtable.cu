@@ -282,10 +282,10 @@ __global__ void repopulate_uhs_hashtable_values_from_array_gpu(uhs_hashtable_slo
 
 void allreduce_uhs_frequencies(uhs_hashtable_slot* uhs_frequencies_hashtable, uint64_t uhs_hashtable_capacity, uhs_key_t* uhs_mmers, uint64_t uhs_mmers_count, long mpi_mode) {
 
-	size_t mmer_frequencies_size = (uhs_mmers_count * sizeof(uhs_value_t));
-	uhs_value_t* mmer_frequencies_local = ((uhs_value_t*) malloc(mmer_frequencies_size));
+    uhs_value_t mmer_frequencies_local[uhs_mmers_count];
+	uhs_value_t mmer_frequencies_total[uhs_mmers_count];
 	uhs_value_t* mmer_frequencies_gpu;
-	uhs_value_t* mmer_frequencies_total = ((uhs_value_t*) malloc(mmer_frequencies_size));
+	size_t mmer_frequencies_size = (uhs_mmers_count * sizeof(uhs_value_t));
 	cudaMalloc(&mmer_frequencies_gpu, mmer_frequencies_size);
 
 	int min_grid_size;
@@ -328,8 +328,5 @@ void allreduce_uhs_frequencies(uhs_hashtable_slot* uhs_frequencies_hashtable, ui
 		mmer_frequencies_gpu
 	);
 
-	free(mmer_frequencies_local);
 	cudaFree(mmer_frequencies_gpu);
-	free(mmer_frequencies_total);
-
 }
